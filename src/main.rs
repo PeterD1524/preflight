@@ -25,9 +25,9 @@ enum Cmd {
     Check {
         #[arg(long, short)]
         config: String,
-        /// Pause before each check and wait for Enter to proceed (q to quit)
-        #[arg(long, short = 's')]
-        step: bool,
+        /// Confirm each check before running it
+        #[arg(long, short = 'i')]
+        interactive: bool,
     },
     /// Launch a shell with the environment defined in the config file
     Shell {
@@ -503,7 +503,10 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Cmd::Check { config, step } => {
+        Cmd::Check {
+            config,
+            interactive,
+        } => {
             let cfg = load_config(&config)?;
             let checks = cfg.check.unwrap_or_default();
 
@@ -517,14 +520,15 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
             let stdin = std::io::stdin();
 
             for (i, check) in checks.iter().enumerate() {
-                if step {
+                if interactive {
                     let desc = check_description(check);
-                    eprint!("[{}/{}] Run '{}'? [Enter/q] ", i + 1, checks.len(), desc);
+                    eprint!("[{}/{}] Run '{}'? [Y/n] ", i + 1, checks.len(), desc);
                     let mut input = String::new();
                     stdin.read_line(&mut input)?;
-                    if input.trim().eq_ignore_ascii_case("q") {
-                        println!("Aborted.");
-                        break;
+                    let input = input.trim();
+                    if input.eq_ignore_ascii_case("n") || input.eq_ignore_ascii_case("no") {
+                        println!("[SKIP] {}", desc);
+                        continue;
                     }
                 }
 
