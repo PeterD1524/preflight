@@ -25,6 +25,9 @@ enum Cmd {
     Check {
         #[arg(long, short)]
         config: String,
+        /// Pause before each check and wait for Enter to proceed (q to quit)
+        #[arg(long, short = 's')]
+        step: bool,
     },
     /// Launch a shell with the environment defined in the config file
     Shell {
@@ -227,6 +230,18 @@ struct CheckResult {
     description: String,
     passed: bool,
     detail: Option<String>,
+}
+
+fn check_description(check: &Check) -> &str {
+    match check {
+        Check::EnvVar { description, .. }
+        | Check::CommandExists { description, .. }
+        | Check::FileExists { description, .. }
+        | Check::DirExists { description, .. }
+        | Check::FileContains { description, .. }
+        | Check::Command { description, .. }
+        | Check::Script { description, .. } => description.as_deref().unwrap_or("(unnamed)"),
+    }
 }
 
 fn run_check(check: &Check) -> CheckResult {
@@ -488,7 +503,7 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Cmd::Check { config } => {
+        Cmd::Check { config, step } => {
             let cfg = load_config(&config)?;
             let checks = cfg.check.unwrap_or_default();
 
@@ -499,8 +514,20 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
 
             let mut passed = 0;
             let mut failed = 0;
+            let stdin = std::io::stdin();
 
-            for check in &checks {
+            for (i, check) in checks.iter().enumerate() {
+                if step {
+                    let desc = check_description(check);
+                    eprint!("[{}/{}] Run '{}'? [Enter/q] ", i + 1, checks.len(), desc);
+                    let mut input = String::new();
+                    stdin.read_line(&mut input)?;
+                    if input.trim().eq_ignore_ascii_case("q") {
+                        println!("Aborted.");
+                        break;
+                    }
+                }
+
                 let result = run_check(check);
                 if result.passed {
                     println!("[PASS] {}", result.description);
