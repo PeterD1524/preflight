@@ -1,0 +1,48 @@
+# Simple test config for smoke testing on any Linux host
+
+[vars]
+test_dir = "/tmp"
+
+[shell]
+home = "${test_dir}"
+shell = "/bin/bash"
+
+[[check]]
+description = "USER is set"
+type = "env_var"
+name = "USER"
+value = "${USER}"
+
+[[check]]
+description = "bash exists in PATH"
+type = "command_exists"
+command = "bash"
+
+[[check]]
+description = "/tmp exists"
+type = "dir_exists"
+path = "${test_dir}"
+
+[[check]]
+description = "/etc/hostname exists"
+type = "file_exists"
+path = "/etc/hostname"
+
+[[check]]
+description = "/etc/os-release contains ID"
+type = "file_contains"
+path = "/etc/os-release"
+contains = "ID="
+
+[[check]]
+description = "uname runs successfully"
+type = "command"
+command = "uname"
+args = ["-s"]
+exit_code = 0
+stdout_contains = "Linux"
+
+[[check]]
+description = "true script passes"
+type = "script"
+script = "test -d /tmp"
