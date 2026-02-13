@@ -10,7 +10,10 @@ use serde::Deserialize;
 // ── CLI ──────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "preflight", about = "Declarative environment checker and shell launcher")]
+#[command(
+    name = "preflight",
+    about = "Declarative environment checker and shell launcher"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Cmd,
@@ -351,15 +354,15 @@ fn run_check(check: &Check) -> CheckResult {
                     if code != expected_code {
                         failures.push(format!("exit code {} (expected {})", code, expected_code));
                     }
-                    if let Some(expected) = stdout_contains {
-                        if !stdout.contains(expected.as_str()) {
-                            failures.push(format!("stdout missing '{}'", expected));
-                        }
+                    if let Some(expected) = stdout_contains
+                        && !stdout.contains(expected.as_str())
+                    {
+                        failures.push(format!("stdout missing '{}'", expected));
                     }
-                    if let Some(expected) = stderr_contains {
-                        if !stderr.contains(expected.as_str()) {
-                            failures.push(format!("stderr missing '{}'", expected));
-                        }
+                    if let Some(expected) = stderr_contains
+                        && !stderr.contains(expected.as_str())
+                    {
+                        failures.push(format!("stderr missing '{}'", expected));
                     }
 
                     CheckResult {
