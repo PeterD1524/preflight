@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, ExitCode};
 
 use clap::{Parser, Subcommand};
 use indexmap::IndexMap;
@@ -92,9 +92,21 @@ enum Check {
 // ── Variable substitution ────────────────────────────────────────────
 
 fn substitute(s: &str, vars: &HashMap<String, String>) -> String {
-    let mut result = s.to_string();
-    for (k, v) in vars {
-        result = result.replace(&format!("${{{}}}", k), v);
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '$' && chars.peek() == Some(&'{') {
+            chars.next(); // consume '{'
+            let key: String = chars.by_ref().take_while(|&c| c != '}').collect();
+            if let Some(val) = vars.get(&key) {
+                result.push_str(val);
+            } else {
+                // preserve unresolved references as-is
+                result.push_str(&format!("${{{}}}", key));
+            }
+        } else {
+            result.push(c);
+        }
     }
     result
 }
@@ -414,10 +426,21 @@ fn run_check(check: &Check) -> CheckResult {
     }
 }
 
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    match path.metadata() {
+        Ok(meta) => meta.is_file() && (meta.permissions().mode() & 0o111 != 0),
+        Err(_) => false,
+    }
+}
+
 fn which(cmd: &str) -> bool {
-    if let Ok(path) = std::env::var("PATH") {
-        for dir in path.split(':') {
-            if Path::new(dir).join(cmd).is_file() {
+    if cmd.contains('/') {
+        return is_executable(Path::new(cmd));
+    }
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in path_var.split(':') {
+            if is_executable(&Path::new(dir).join(cmd)) {
                 return true;
             }
         }
@@ -447,27 +470,21 @@ fn launch_shell(shell_config: ShellConfig) -> Result<(), Box<dyn std::error::Err
         }
     }
 
-    Err(cmd.exec())?;
-    Ok(())
+    let err = cmd.exec();
+    Err(err.into())
 }
 
 // ── Main ─────────────────────────────────────────────────────────────
 
 fn load_config(path: &str) -> Result<RawConfig, Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path)?;
-    let config: RawConfig = toml::from_str(&content)?;
-    let vars = resolve_vars(config.vars)?;
-    Ok(substitute_config(
-        RawConfig {
-            vars: None,
-            shell: config.shell,
-            check: config.check,
-        },
-        &vars,
-    ))
+    let mut config: RawConfig = toml::from_str(&content)?;
+    let vars =
+        resolve_vars(config.vars.take()).map_err(|e| format!("variable resolution failed: {e}"))?;
+    Ok(substitute_config(config, &vars))
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn run() -> Result<bool, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -477,7 +494,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if checks.is_empty() {
                 println!("No checks defined.");
-                return Ok(());
+                return Ok(true);
             }
 
             let mut passed = 0;
@@ -499,17 +516,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!();
             println!("{} passed, {} failed (of {} checks)", passed, failed, total);
 
-            if failed > 0 {
-                std::process::exit(1);
-            }
+            Ok(failed == 0)
         }
 
         Cmd::Shell { config } => {
             let cfg = load_config(&config)?;
             let shell_config = cfg.shell.ok_or("no [shell] section in config")?;
             launch_shell(shell_config)?;
+            Ok(true)
         }
     }
+}
 
-    Ok(())
+fn main() -> ExitCode {
+    match run() {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::from(1),
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(2)
+        }
+    }
 }
